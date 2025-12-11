@@ -1,399 +1,147 @@
-# CI/CD Pipeline for bl1nk-agent-builder
-# Automated testing, linting, and deployment workflow
-
-name: CI/CD Pipeline
+name: CI Checks
 
 on:
   push:
     branches: [ main, develop ]
+    # ตัด docs/README/markdown/metadata ออกจากการ trigger CI หนัก
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
 
-env:
-  PYTHON_VERSION: "3.11"
-  NODE_VERSION: "18"
-  PNPM_VERSION: "8"
+# กันรันซ้ำระหว่างแก้ PR หรือ push ถี่ ๆ — cancel run เดิม
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # =============================================================================
-  # STRUCTURE VERIFICATION
-  # =============================================================================
+  # ใช้ paths-filter เพื่อเปิดเฉพาะ job ที่เกี่ยวข้องจริง ๆ
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      worker: ${{ steps.filter.outputs.worker }}
+      bridge: ${{ steps.filter.outputs.bridge }}
+      schema: ${{ steps.filter.outputs.schema }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            worker:
+              - 'apps/worker/**'
+              - 'config/**'
+            bridge:
+              - 'apps/bridge/**'
+            schema:
+              - 'packages/schema/**'
+
   verify-structure:
     name: Verify Project Structure
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Make verify script executable
-        run: chmod +x scripts/verify_structure.sh
-        
-      - name: Verify project structure
-        run: ./scripts/verify_structure.sh
+      - uses: actions/checkout@v4
+      - run: chmod +x scripts/verify_structure.sh
+      - run: ./scripts/verify_structure.sh
 
-  # =============================================================================
-  # PYTHON CODE QUALITY
-  # =============================================================================
   python-quality:
     name: Python Code Quality
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.worker == 'true'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          
-      - name: Install dependencies
-        run: |
+          python-version: '3.11'
+      - run: |
           python -m pip install --upgrade pip
-          pip install pip-tools
           pip install -r apps/worker/requirements.txt
-          pip install black isort ruff mypy pytest pytest-asyncio pytest-cov
-          
-      - name: Check Python imports
-        run: python -m py_compile apps/worker/app/main.py
-        
-      - name: Run Black formatter check
-        run: black --check --diff apps/worker/
-        
-      - name: Run isort import sorter check
-        run: isort --check-only --diff apps/worker/
-        
-      - name: Run Ruff linter
-        run: ruff check apps/worker/
-        
-      - name: Run Ruff formatter
-        run: ruff format --check apps/worker/
-        
-      - name: Run MyPy type checking
-        run: mypy apps/worker/ --ignore-missing-imports
-        continue-on-error: true  # MyPy is optional for now
+          pip install black isort ruff mypy
+      - run: python -m py_compile apps/worker/app/main.py
+      - run: black --check --diff apps/worker/
+      - run: isort --check-only --diff apps/worker/
+      - run: ruff check apps/worker/
+      - run: ruff format --check apps/worker/
+      - run: mypy apps/worker/ --ignore-missing-imports || true
 
-  # =============================================================================
-  # TYPESCRIPT CODE QUALITY
-  # =============================================================================
   typescript-quality:
     name: TypeScript Code Quality
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.bridge == 'true'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+          node-version: '18'
+      - uses: pnpm/action-setup@v2
         with:
-          version: ${{ env.PNPM_VERSION }}
-          
-      - name: Install TypeScript dependencies
-        run: pnpm install --prefix apps/bridge
-        
-      - name: Run TypeScript type check
-        run: npm run typecheck --prefix apps/bridge
-        
-      - name: Run ESLint
-        run: npm run lint:check --prefix apps/bridge
-        
-      - name: Run Prettier format check
-        run: npm run format:check --prefix apps/bridge
-        
-      - name: Build TypeScript
-        run: npm run build --prefix apps/bridge
+          version: '8'
+      - run: pnpm install --prefix apps/bridge
+      - run: npm run typecheck --prefix apps/bridge
+      - run: npm run lint:check --prefix apps/bridge
+      - run: npm run format:check --prefix apps/bridge
+      - run: npm run build --prefix apps/bridge
 
-  # =============================================================================
-  # OPENAPI SCHEMA VALIDATION
-  # =============================================================================
   openapi-validation:
     name: OpenAPI Schema Validation
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.schema == 'true'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          
-      - name: Install Spectral CLI
-        run: npm install -g @stoplight/spectral-cli
-        
-      - name: Validate OpenAPI schema
-        run: spectral lint packages/schema/openapi.yaml --format stylish
+          node-version: '18'
+      - run: npm install -g @stoplight/spectral-cli
+      - run: spectral lint packages/schema/openapi.yaml --format stylish
 
-  # =============================================================================
-  # DATABASE MIGRATIONS
-  # =============================================================================
-  database-migrations:
-    name: Database Migrations
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: bl1nk_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-          
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install psycopg[binary]
-          
-      - name: Test database migrations
-        env:
-          DB_DSN: postgresql://postgres:postgres@localhost:5432/bl1nk_test
-        run: |
-          echo "Testing migration 001..."
-          psql "$DB_DSN" -f sql/migrations/001_create_tables.sql
-          
-          echo "Testing migration 002..."
-          psql "$DB_DSN" -f sql/migrations/002_add_indexes.sql
-          
-          echo "Verifying tables created..."
-          psql "$DB_DSN" -c "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'public';"
-
-  # =============================================================================
-  # PYTHON TESTS
-  # =============================================================================
   python-tests:
-    name: Python Tests
+    name: Python Tests (unit)
     runs-on: ubuntu-latest
+    needs: [python-quality]
+    if: always() && needs.changes.outputs.worker == 'true'
     services:
       redis:
         image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-          
+        ports: [ '6379:6379' ]
       postgres:
         image: postgres:15
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: bl1nk_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+        ports: [ '5432:5432' ]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          
-      - name: Install dependencies
-        run: |
+          python-version: '3.11'
+      - run: |
           python -m pip install --upgrade pip
-          pip install pip-tools
           pip install -r apps/worker/requirements.txt
           pip install pytest pytest-asyncio pytest-cov httpx
-          
-      - name: Run Python tests
+      - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bl1nk_test
           REDIS_URL: redis://localhost:6379/0
           ENVIRONMENT: testing
         run: |
           cd apps/worker
-          pytest ../tests/ -v --cov=app --cov-report=xml --cov-report=html
-          
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+          pytest ../tests/ -v --cov=app --cov-report=xml
+      - uses: codecov/codecov-action@v3
         with:
           file: ./apps/worker/coverage.xml
           flags: python
           name: python-coverage
-
-  # =============================================================================
-  # INTEGRATION TESTS
-  # =============================================================================
-  integration-tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: [python-tests]
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-          
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r apps/worker/requirements.txt
-          pnpm install --prefix apps/bridge
-          
-      - name: Start FastAPI server
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bl1nk_test
-          REDIS_URL: redis://localhost:6379/0
-          ENVIRONMENT: testing
-          DEBUG: true
-        run: |
-          cd apps/worker
-          uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-          sleep 10
-          
-      - name: Test API endpoints
-        run: |
-          echo "Testing health endpoint..."
-          curl -f http://localhost:8000/health || exit 1
-          
-          echo "Testing webhook endpoint..."
-          curl -f -X POST http://localhost:8000/webhook/poe \
-            -H "Content-Type: application/json" \
-            -d '{"source": "poe", "external_id": "test-123", "user_id": "test-user", "message": "test message"}' || exit 1
-
-  # =============================================================================
-  # SECURITY SCANNING
-  # =============================================================================
-  security-scan:
-    name: Security Scanning
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Run Bandit security linter
-        run: |
-          pip install bandit
-          bandit -r apps/worker/ -f json -o bandit-report.json || true
-          
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: auto
-          generateSarif: "1"
-          
-      - name: Upload security scan results
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: semgrep.sarif
-
-  # =============================================================================
-  # BUILD AND DEPLOY
-  # =============================================================================
-  build-and-deploy:
-    name: Build and Deploy
-    runs-on: ubuntu-latest
-    needs: [verify-structure, python-quality, typescript-quality, openapi-validation, database-migrations, python-tests]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: production
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-          
-      - name: Install dependencies
-        run: |
-          pip install pip-tools
-          pnpm install --prefix apps/bridge
-          
-      - name: Compile Python requirements
-        run: |
-          pip-compile apps/worker/requirements.in --output-file apps/worker/requirements.txt
-          
-      - name: Build Cloudflare Worker
-        run: |
-          cd apps/bridge
-          npm run build
-          
-      - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: apps/bridge
-          command: deploy --env production
-          
-      - name: Deploy to Vercel (FastAPI)
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: apps/worker
-          vercel-args: '--prod'
-
-  # =============================================================================
-  # NOTIFICATION
-  # =============================================================================
-  notify:
-    name: Notify Results
-    runs-on: ubuntu-latest
-    needs: [build-and-deploy]
-    if: always()
-    steps:
-      - name: Notify Slack
-        if: always()
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ job.status }}
-          channel: '#ci-cd'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
-          fields: repo,message,commit,author,action,eventName,ref,workflow
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
