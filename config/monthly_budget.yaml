@@ -1,0 +1,57 @@
+# Monthly Budget Configuration
+# All values in credits/tokens
+
+monthly_budget: 1000
+daily_budget: 35
+
+provider_budgets:
+  openrouter: 500
+  cloudflare: 200
+  bedrock: 200
+  anthropic: 300
+
+# Alert settings
+alerts:
+  email_recipients:
+    - "admin@bl1nk.dev"
+    - "billing@bl1nk.dev"
+  
+  # Webhook URLs for notifications
+  slack_webhook: ""
+  discord_webhook: ""
+  webhook_url: ""
+  
+  # Notification thresholds (percentages)
+  budget_warning_threshold: 80
+  budget_critical_threshold: 90
+
+# Cost optimization settings
+optimization:
+  # Enable automatic provider switching based on cost
+  auto_provider_switching: true
+  
+  # Maximum cost per 1K tokens (in USD)
+  max_cost_per_1k_tokens: 0.01
+  
+  # Preferred providers (in order of preference)
+  preferred_providers:
+    - openrouter
+    - cloudflare
+    - anthropic
+    - bedrock
+
+# Reporting settings
+reporting:
+  # Generate daily reports
+  daily_reports: true
+  
+  # Generate weekly reports
+  weekly_reports: true
+  
+  # Generate monthly reports
+  monthly_reports: true
+  
+  # Report recipients
+  report_recipients:
+    - "admin@bl1nk.dev"
+    - "finance@bl1nk.dev"

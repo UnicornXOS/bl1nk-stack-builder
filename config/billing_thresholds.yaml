@@ -1,0 +1,25 @@
+# Billing Alert Thresholds Configuration
+# Values are percentages (0-100)
+
+openrouter:
+  warning_threshold: 80
+  critical_threshold: 90
+
+cloudflare:
+  warning_threshold: 75
+  critical_threshold: 85
+
+bedrock:
+  warning_threshold: 85
+  critical_threshold: 95
+
+anthropic:
+  warning_threshold: 80
+  critical_threshold: 90
+
+# Additional settings
+alert_cooldown_minutes: 60  # Minimum time between alerts of the same type
+notification_methods:
+  - email
+  - slack
+  - webhook

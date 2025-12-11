@@ -1,0 +1,1119 @@
+openapi: 3.0.3
+info:
+  title: bl1nk-agent-builder API
+  description: |
+    AI Agent Platform with RAG, multi-agent, MCP integration, and compliance
+    
+    ## Architecture
+    - Edge: Cloudflare Workers (proxy)
+    - Core: FastAPI (orchestrator)
+    - Database: Neon Postgres + pgvector
+    - Queue: Upstash Redis
+    
+    ## Features
+    - Webhook receivers for Poe, Manus, Slack
+    - Task management with SSE streaming
+    - Skill invocation and MCP tool integration
+    - Vector search and embeddings
+    - Multi-provider LLM routing
+  version: 1.0.0
+  contact:
+    name: bl1nk-agent-builder
+    url: https://bl1nk.site
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.bl1nk.site
+    description: Production server
+  - url: http://localhost:8000
+    description: Development server
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  /webhook/poe:
+    post:
+      summary: Poe webhook receiver
+      description: |
+        Receive webhook from Poe bot platform
+        Validates payload and creates task with idempotency
+      operationId: webhookPoe
+      tags:
+        - Webhooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookPayload"
+            examples:
+              poe_example:
+                value:
+                  source: "poe"
+                  external_id: "poe_msg_12345"
+                  user_id: "user_abc123"
+                  workspace_id: "workspace_xyz789"
+                  message: "Hello, help me with coding"
+                  metadata:
+                    context: "conversation"
+                    user_agent: "Poe/1.0"
+      responses:
+        200:
+          description: Task accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AckResponse"
+              examples:
+                success:
+                  value:
+                    status: "accepted"
+                    task_id: 12345
+                    trace_id: "tr_abc123"
+                    message: "Task queued successfully"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        409:
+          description: Duplicate task (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AckResponse"
+              examples:
+                duplicate:
+                  value:
+                    status: "accepted"
+                    task_id: 12345
+                    trace_id: "tr_abc123"
+                    message: "Task already exists"
+
+  /webhook/manus:
+    post:
+      summary: Manus webhook receiver
+      description: |
+        Receive webhook from Manus platform
+        Validates payload and creates task with idempotency
+      operationId: webhookManus
+      tags:
+        - Webhooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookPayload"
+            examples:
+              manus_example:
+                value:
+                  source: "manus"
+                  external_id: "manus_req_67890"
+                  user_id: "user_xyz789"
+                  workspace_id: "workspace_abc123"
+                  message: "Create a summary of this document"
+                  metadata:
+                    document_id: "doc_12345"
+                    priority: "normal"
+      responses:
+        200:
+          $ref: "#/components/responses/AckResponse"
+        400:
+          $ref: "#/components/responses/BadRequest"
+
+  /webhook/slack:
+    post:
+      summary: Slack event receiver
+      description: |
+        Receive webhook from Slack
+        Validates X-Slack-Signature header
+        Supports app_mention and message events
+      operationId: webhookSlack
+      tags:
+        - Webhooks
+      security:
+        - SlackSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SlackWebhookPayload"
+            examples:
+              mention_example:
+                value:
+                  type: "event_callback"
+                  event:
+                    type: "app_mention"
+                    user: "U123ABC456"
+                    text: "<@U789XYZ> help me with this code"
+                    channel: "C123ABC456"
+                    ts: "1234567890.123456"
+                  team_id: "T123ABC456"
+      responses:
+        200:
+          $ref: "#/components/responses/AckResponse"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /webhook/github:
+    post:
+      summary: GitHub App webhook receiver
+      description: |
+        Receive webhook from GitHub App
+        Validates X-Hub-Signature-256 header
+        Handles pull_request, issue, and push events
+      operationId: webhookGitHub
+      tags:
+        - Webhooks
+      security:
+        - GitHubSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubWebhookPayload"
+            examples:
+              pull_request_example:
+                value:
+                  action: "opened"
+                  number: 42
+                  pull_request:
+                    title: "Fix bug in auth module"
+                    body: "This PR fixes..."
+                    head:
+                      sha: "abc123def456"
+                  repository:
+                    full_name: "user/repo"
+                  installation:
+                    id: 123456
+      responses:
+        200:
+          $ref: "#/components/responses/AckResponse"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /tasks:
+    post:
+      summary: Create task manually
+      description: |
+        Create a new task for processing
+        Returns task_id for tracking
+      operationId: createTask
+      tags:
+        - Tasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreateRequest"
+            examples:
+              simple_task:
+                value:
+                  user_id: "user_abc123"
+                  workspace_id: "workspace_xyz789"
+                  input:
+                    type: "text"
+                    content: "Help me write a Python function"
+                    context: "I need a function to parse CSV files"
+      responses:
+        201:
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              examples:
+                created:
+                  value:
+                    id: 12345
+                    status: "pending"
+                    created_at: "2025-12-11T16:26:35Z"
+                    input:
+                      type: "text"
+                      content: "Help me write a Python function"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /tasks/{id}:
+    get:
+      summary: Get task status
+      description: |
+        Retrieve task details and status
+        Returns full task information including metadata
+      operationId: getTask
+      tags:
+        - Tasks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Task ID
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        200:
+          description: Task details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              examples:
+                pending:
+                  value:
+                    id: 12345
+                    status: "pending"
+                    created_at: "2025-12-11T16:26:35Z"
+                    updated_at: "2025-12-11T16:26:35Z"
+                    input:
+                      type: "text"
+                      content: "Help me write a Python function"
+                processing:
+                  value:
+                    id: 12345
+                    status: "processing"
+                    created_at: "2025-12-11T16:26:35Z"
+                    updated_at: "2025-12-11T16:27:00Z"
+                    progress: 50
+                    input:
+                      type: "text"
+                      content: "Help me write a Python function"
+                completed:
+                  value:
+                    id: 12345
+                    status: "completed"
+                    created_at: "2025-12-11T16:26:35Z"
+                    updated_at: "2025-12-11T16:28:15Z"
+                    input:
+                      type: "text"
+                      content: "Help me write a Python function"
+                    output:
+                      type: "text"
+                      content: |
+                        Here's a Python function to parse CSV files:
+                        
+                        ```python
+                        import csv
+                        
+                        def parse_csv(file_path):
+                            with open(file_path, 'r') as file:
+                                reader = csv.DictReader(file)
+                                return list(reader)
+                        ```
+                failed:
+                  value:
+                    id: 12345
+                    status: "failed"
+                    created_at: "2025-12-11T16:26:35Z"
+                    updated_at: "2025-12-11T16:27:45Z"
+                    error_reason: "Provider timeout after 30 seconds"
+                    input:
+                      type: "text"
+                      content: "Help me write a Python function"
+        404:
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                not_found:
+                  value:
+                    error: "TaskNotFound"
+                    message: "Task with id 99999 not found"
+                    trace_id: "tr_abc123"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /tasks/{id}/stream:
+    get:
+      summary: Stream task output (SSE)
+      description: |
+        Get real-time updates of task progress via Server-Sent Events
+        Connection stays open until task completes or fails
+      operationId: streamTask
+      tags:
+        - Tasks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Task ID
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        200:
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE event format:
+                  data: { type: "event_type", data: {...} }
+                  
+                  Event types:
+                  - meta: Initial task metadata
+                  - progress: Progress update (0-100)
+                  - text: Partial text output
+                  - tool_call: Tool invocation result
+                  - done: Final result
+                  - error: Error occurred
+              examples:
+                stream_example:
+                  value: |
+                    data: {"type": "meta", "data": {"task_id": 12345, "status": "processing"}}
+                    
+                    data: {"type": "progress", "data": {"percentage": 25}}
+                    
+                    data: {"type": "text", "data": "I'll help you write a Python function"}
+                    
+                    data: {"type": "progress", "data": {"percentage": 75}}
+                    
+                    data: {"type": "text", "data": "Here's the complete function:"}
+                    
+                    data: {"type": "done", "data": {"status": "completed", "result": "..."}}
+        404:
+          $ref: "#/components/responses/NotFound"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /skills/invoke:
+    post:
+      summary: Invoke skill
+      description: |
+        Execute a skill (custom function/tool)
+        Skills are predefined functions that can be invoked by agents
+      operationId: invokeSkill
+      tags:
+        - Skills
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillInvokeRequest"
+            examples:
+              search_skill:
+                value:
+                  skill_id: "search_web"
+                  inputs:
+                    query: "Python async best practices"
+                    max_results: 5
+                  request_id: "req_abc123"
+      responses:
+        202:
+          description: Skill invocation accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvocationResponse"
+              examples:
+                accepted:
+                  value:
+                    invocation_id: "inv_xyz789"
+                    status: "accepted"
+                    estimated_duration: 5
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /skills/{id}:
+    get:
+      summary: Get skill details
+      description: |
+        Retrieve skill definition and metadata
+      operationId: getSkill
+      tags:
+        - Skills
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Skill ID
+          schema:
+            type: string
+      responses:
+        200:
+          description: Skill details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Skill"
+        404:
+          $ref: "#/components/responses/NotFound"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /mcp/tools/list:
+    get:
+      summary: List available MCP tools
+      description: |
+        Get list of all available Model Context Protocol tools
+        Tools are dynamically registered and can be called by agents
+      operationId: listMcpTools
+      tags:
+        - MCP
+      responses:
+        200:
+          description: Tool list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolListResponse"
+              examples:
+                tools_list:
+                  value:
+                    tools:
+                      - id: "search_web"
+                        name: "Web Search"
+                        description: "Search the web for information"
+                        inputSchema:
+                          type: "object"
+                          properties:
+                            query:
+                              type: "string"
+                              description: "Search query"
+                            max_results:
+                              type: "integer"
+                              description: "Maximum results to return"
+                              default: 10
+                      - id: "search_files"
+                        name: "File Search"
+                        description: "Search through files and documents"
+                        inputSchema:
+                          type: "object"
+                          properties:
+                            query:
+                              type: "string"
+                              description: "Search query"
+                            file_types:
+                              type: "array"
+                              items:
+                                type: "string"
+                              description: "File types to search"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /mcp/tools/call:
+    post:
+      summary: Call MCP tool
+      description: |
+        Execute a Model Context Protocol tool
+        Tools perform specific actions and return structured results
+      operationId: callMcpTool
+      tags:
+        - MCP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToolCallRequest"
+            examples:
+              call_search:
+                value:
+                  tool_id: "search_web"
+                  inputs:
+                    query: "Python asyncio tutorial"
+                    max_results: 3
+      responses:
+        200:
+          description: Tool execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolCallResponse"
+              examples:
+                search_result:
+                  value:
+                    tool_id: "search_web"
+                    result:
+                      results:
+                        - title: "Python Asyncio Tutorial"
+                          url: "https://example.com/asyncio"
+                          snippet: "Learn async programming in Python..."
+                        - title: "Async/Await Guide"
+                          url: "https://example.com/async-await"
+                          snippet: "Complete guide to async/await syntax..."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /mcp/tools/{id}/stream:
+    get:
+ MCP tool output      summary: Stream
+      description: |
+        Get real-time output from long-running MCP tools
+      operationId: streamMcpTool
+      tags:
+        - MCP
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Tool invocation ID
+          schema:
+            type: string
+      responses:
+        200:
+          description: Tool output stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        404:
+          $ref: "#/components/responses/NotFound"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+
+  /health:
+    get:
+      summary: Health check
+      description: |
+        Check service health status
+        Returns status of all dependencies
+      operationId: healthCheck
+      tags:
+        - System
+      responses:
+        200:
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                healthy:
+                  value:
+                    status: "healthy"
+                    timestamp: "2025-12-11T16:26:35Z"
+                    uptime: 3600
+                    dependencies:
+                      database: "connected"
+                      redis: "connected"
+                      providers:
+                        openrouter: "available"
+                        bedrock: "available"
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: |
+        Prometheus metrics endpoint
+        Returns service metrics for monitoring
+      operationId: getMetrics
+      tags:
+        - System
+      responses:
+        200:
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT bearer token
+    SlackSignature:
+Key
+      in      type: api: header
+      name: X-Slack-Signature
+      description: Slack request signature
+    GitHubSignature:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: GitHub webhook signature
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            validation_error:
+              value:
+                error: "ValidationError"
+                message: "Invalid request payload"
+                details:
+                  - field: "user_id"
+                    message: "Required field missing"
+                trace_id: "tr_abc123"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalid_token:
+              value:
+                error: "Unauthorized"
+                message: "Invalid or missing authentication token"
+                trace_id: "tr_abc123"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            resource_not_found:
+              value:
+                error: "NotFound"
+                message: "Resource not found"
+                trace_id: "tr_abc123"
+
+  schemas:
+    WebhookPayload:
+      type: object
+      required:
+        - source
+        - external_id
+        - user_id
+        - message
+      properties:
+        source:
+          type: string
+          enum: [poe, manus, slack, github]
+          description: Source platform
+        external_id:
+          type: string
+          description: Unique identifier from source platform
+          example: "poe_msg_12345"
+        user_id:
+          type: string
+          description: User identifier
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        workspace_id:
+          type: string
+          description: Workspace identifier
+          format: uuid
+          nullable: true
+          example: "123e4567-e89b-12d3-a456-426614174001"
+        message:
+          type: string
+          description: Message or request content
+          maxLength: 10000
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Additional metadata from source
+          example:
+            context: "conversation"
+            user_agent: "Poe/1.0"
+            priority: "normal"
+
+    SlackWebhookPayload:
+      type: object
+      required:
+        - type
+        - event
+      properties:
+        type:
+          type: string
+          enum: [event_callback, url_verification]
+          description: Event type
+        event:
+          type: object
+          description: Slack event data
+          properties:
+            type:
+              type: string
+              enum: [app_mention, message]
+              description: Event type
+            user:
+              type: string
+              description: User ID who triggered the event
+            text:
+              type: string
+              description: Message text
+            channel:
+              type: string
+              description: Channel ID
+            ts:
+              type: string
+              description: Message timestamp
+        team_id:
+          type: string
+          description: Workspace ID
+        api_app_id:
+          type: string
+          description: App ID
+
+    GitHubWebhookPayload:
+      type: object
+      required:
+        - action
+        - installation
+      properties:
+        action:
+          type: string
+          description: Action that triggered the webhook
+        number:
+          type: integer
+          description: Pull request or issue number
+        pull_request:
+          type: object
+          description: Pull request data
+          properties:
+            title:
+              type: string
+              description: PR title
+            body:
+              type: string
+              description: PR description
+            head:
+              type: object
+              properties:
+                sha:
+                  type: string
+                  description: Head commit SHA
+        repository:
+          type: object
+          properties:
+            full_name:
+              type: string
+              description: Repository full name
+        installation:
+          type: object
+          properties:
+            id:
+              type: integer
+              description: Installation ID
+
+    TaskCreateRequest:
+      type: object
+      required:
+        - user_id
+        - input
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: User identifier
+        workspace_id:
+          type: string
+          format: uuid
+          description: Workspace identifier
+          nullable: true
+        input:
+          type: object
+          required:
+            - type
+            - content
+          properties:
+            type:
+              type: string
+              enum: [text, file, url, structured]
+              description: Input type
+            content:
+              type: string
+              description: Input content
+            metadata:
+              type: object
+              additionalProperties: true
+              description: Additional input metadata
+
+    Task:
+      type: object
+      required:
+        - id
+        - status
+        - created_at
+        - updated_at
+        - input
+      properties:
+        id:
+          type: integer
+          description: Task identifier
+          minimum: 1
+        external_id:
+          type: string
+          description: External identifier from source
+          nullable: true
+        source:
+          type: string
+          enum: [poe, manus, slack, github, manual]
+          description: Task source
+        user_id:
+          type: string
+          format: uuid
+          description: User identifier
+        workspace_id:
+          type: string
+          format: uuid
+          description: Workspace identifier
+          nullable: true
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, cancelled]
+          description: Task status
+        progress:
+          type: integer
+          description: Progress percentage (0-100)
+          minimum: 0
+          maximum: 100
+          nullable: true
+        input:
+          type: object
+          properties:
+            type:
+              type: string
+            content:
+              type: string
+            metadata:
+              type: object
+        output:
+          type: object
+          description: Task output
+          nullable: true
+          properties:
+            type:
+              type: string
+            content:
+              type: string
+            metadata:
+              type: object
+        error_reason:
+          type: string
+          description: Error description if task failed
+          nullable: true
+        trace_id:
+          type: string
+          description: Trace identifier for debugging
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    AckResponse:
+      type: object
+      required:
+        - status
+        - task_id
+        - trace_id
+      properties:
+        status:
+          type: string
+          enum: [accepted, rejected]
+          description: Request status
+        task_id:
+          type: integer
+          description: Task identifier
+        trace_id:
+          type: string
+          description: Trace identifier for debugging
+        message:
+          type: string
+          description: Status message
+
+    SkillInvokeRequest:
+      type: object
+      required:
+        - skill_id
+        - inputs
+      properties:
+        skill_id:
+          type: string
+          description: Skill identifier
+        inputs:
+          type: object
+          description: Skill input parameters
+          additionalProperties: true
+        request_id:
+          type: string
+          description: Client request ID for idempotency
+
+    InvocationResponse:
+      type: object
+      required:
+        - invocation_id
+        - status
+      properties:
+        invocation_id:
+          type: string
+          description: Invocation identifier
+        status:
+          type: string
+          enum: [accepted, rejected, running, completed, failed]
+          description: Invocation status
+        estimated_duration:
+          type: integer
+          description: Estimated duration in seconds
+          nullable: true
+
+    Skill:
+      type: object
+      required:
+        - id
+        - name
+        - description
+      properties:
+        id:
+          type: string
+          description: Skill identifier
+        name:
+          type: string
+          description: Skill name
+        description:
+          type: string
+          description: Skill description
+        version:
+          type: string
+          description: Skill version
+        parameters:
+          type: object
+          description: Input parameters schema
+        output_schema:
+          type: object
+          description: Output schema
+        metadata:
+          type: object
+          description: Additional metadata
+
+    ToolListResponse:
+      type: object
+      required:
+        - tools
+      properties:
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/McpTool"
+          description: List of available MCP tools
+
+    McpTool:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - inputSchema
+      properties:
+        id:
+          type: string
+          description: Tool identifier
+        name:
+          type: string
+          description: Tool name
+        description:
+          type: string
+          description: Tool description
+        inputSchema:
+          type: object
+          description: JSON Schema for tool input
+
+    ToolCallRequest:
+      type: object
+      required:
+        - tool_id
+        - inputs
+      properties:
+        tool_id:
+          type: string
+          description: Tool identifier
+        inputs:
+          type: object
+          description: Tool input parameters
+          additionalProperties: true
+
+    ToolCallResponse:
+      type: object
+      required:
+        - tool_id
+        - result
+      properties:
+        tool_id:
+          type: string
+          description: Tool identifier
+        result:
+          type: object
+          description: Tool execution result
+          additionalProperties: true
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+        - uptime
+        - dependencies
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall service status
+        timestamp:
+          type: string
+          format: date-time
+          description: Check timestamp
+        uptime:
+          type: number
+          description: Service uptime in seconds
+        dependencies:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [connected, disconnected, error]
+              description: Database connection status
+            redis:
+              type: string
+              enum: [connected, disconnected, error]
+              description: Redis connection status
+            providers:
+              type: object
+              additionalProperties:
+                type: string
+                enum: [available, unavailable, error]
+              description: Provider availability status
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - trace_id
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Error message
+        details: Additional error:
+          type: object
+          description details
+          additionalProperties: true
+        trace_id:
+          type: string
+          description: Trace identifier for debugging

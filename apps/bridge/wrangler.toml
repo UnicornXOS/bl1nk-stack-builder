@@ -1,0 +1,79 @@
+# Cloudflare Workers configuration for bl1nk-agent-bridge
+# This file configures the Cloudflare Worker deployment
+
+name = "bl1nk-agent-bridge"
+main = "dist/index.js"
+compatibility_date = "2023-11-21"
+compatibility_flags = ["nodejs_compat"]
+
+# Workers KV namespaces
+[[kv_namespaces]]
+binding = "RATE_LIMITS"
+id = "your-kv-namespace-id"
+preview_id = "your-preview-kv-namespace-id"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "your-cache-kv-id"
+preview_id = "your-preview-cache-kv-id"
+
+# Durable Objects
+[[durable_objects.bindings]]
+name = "SESSION_DO"
+class_name = "SessionDO"
+
+# Cron triggers (optional)
+# [[triggers.crons]]
+# schedule = "0 */6 * * *"  # Every 6 hours
+
+# Environment variables
+[env.production.vars]
+ENVIRONMENT = "production"
+LOG_LEVEL = "INFO"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+LOG_LEVEL = "DEBUG"
+
+[env.development.vars]
+ENVIRONMENT = "development"
+LOG_LEVEL = "DEBUG"
+
+# Account settings
+account_id = "your-cloudflare-account-id"
+
+# Routes
+# Uncomment and modify these routes for production deployment
+# [[env.production.routes]]
+# pattern = "api.bl1nk.site/webhook/*"
+# zone_id = "your-zone-id"
+
+# [[env.production.routes]]
+# pattern = "api.bl1nk.site/mcp/*"
+# zone_id = "your-zone-id"
+
+# [[env.production.routes]]
+# pattern = "api.bl1nk.site/skills/*"
+# zone_id = "your-zone-id"
+
+# Service bindings (for internal services)
+# [[env.production.services]]
+# binding = "CORE_API"
+# service = "bl1nk-core"
+# environment = "production"
+
+# Memory and CPU limits
+# [limits]
+# cpu_ms = 50  # 50ms CPU time
+# memory = 128  # 128MB memory
+
+# Bindings for external services
+[vars]
+CORE_API_URL = "https://api.bl1nk.site"
+
+# Secrets (set via wrangler secret put)
+# OPENROUTER_TOKEN
+# CLOUDFLARE_API_TOKEN
+# JWT_SECRET
+# SLACK_SIGNING_SECRET
+# GITHUB_WEBHOOK_SECRET
