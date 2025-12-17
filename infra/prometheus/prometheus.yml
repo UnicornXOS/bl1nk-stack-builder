@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus เอง
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['prometheus:9090']
+
+  # FastAPI worker (ถ้ามี /metrics)
+  - job_name: 'worker'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['worker:8000']
