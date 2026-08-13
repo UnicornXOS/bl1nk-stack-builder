@@ -3,8 +3,11 @@
 
 name = "bl1nk-agent-bridge"
 main = "dist/index.js"
-compatibility_date = "2023-11-21"
+compatibility_date = "2025-02-11"
 compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
 
 # Workers KV namespaces
 [[kv_namespaces]]
@@ -69,6 +72,7 @@ account_id = "your-cloudflare-account-id"
 
 # Bindings for external services
 [vars]
+BACKEND_URL = "https://api.bl1nk.site"
 CORE_API_URL = "https://api.bl1nk.site"
 
 # Secrets (set via wrangler secret put)

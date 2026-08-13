@@ -67,6 +67,10 @@ ls -la
 # ให้สิทธิ์ execute สำหรับสคริปต์
 chmod +x scripts/*.sh
 
+# Windows PowerShell: ไม่มีคำสั่ง `chmod`
+# - แนะนำให้รันใน Git Bash หรือ
+# - เรียกสคริปต์ผ่าน bash โดยตรง เช่น `bash scripts/bootstrap.sh development`
+
 # รัน bootstrap สำหรับ development environment
 ./scripts/bootstrap.sh development
 
@@ -382,8 +386,10 @@ curl -H "Authorization: Bearer $OPENROUTER_TOKEN" \
 # ตรวจสอบไฟล์ .env
 cat .env | grep -E "OPENROUTER_TOKEN|JWT_SECRET|ENCRYPTION_KEY"
 
-# ตรวจสอบว่าไฟล์ .env ถูก load หรือไม่
+# ตรวจสอบว่าไฟล์ .env ถูก load หรือไม่ (export เข้า environment)
+set -a
 source .env
+set +a
 echo $OPENROUTER_TOKEN
 ```
 
@@ -416,7 +422,7 @@ export LOG_LEVEL=DEBUG
 หากพบปัญหาหรือต้องการความช่วยเหลือ:
 
 1. **ตรวจสอบ Logs** ใน `/logs/` directory
-2. **รัน Validation Script** `./scripts/validate_secrets.sh`
+2. **รัน Validation Script** `./scripts/validate_secrets.sh` (อ่านค่าจาก `.env` อัตโนมัติ)
 3. **อ่าน Documentation** ใน `docs/` directory
 4. **เปิด Issue** ใน GitHub repository
 

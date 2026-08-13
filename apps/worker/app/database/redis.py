@@ -6,10 +6,9 @@ Handles Upstash Redis for queue management and caching
 import asyncio
 import logging
 from typing import Optional, Any, Dict, List
-from contextlib import asynccontextmanager
 
-import aioredis
-from aioredis import Redis
+from redis import asyncio as aioredis
+from redis.asyncio import Redis
 
 from app.config.settings import settings
 
